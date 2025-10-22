@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.log
+.DS_Store
+*.bak
+.wrangler/
+.dev.vars
+apps/api/.wrangler/
+apps/api/node_modules/
+apps/web/node_modules/
+apps/web/dist/

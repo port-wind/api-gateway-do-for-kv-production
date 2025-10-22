@@ -1,0 +1,20 @@
+# 飞书 (Lark) Webhook 通知配置示例
+# 复制此文件为 .lark-config 并填入你的配置信息
+# 注意：.lark-config 文件已添加到 .gitignore，不会被提交到版本控制
+
+# 飞书群组 Webhook URL
+# 1. 在飞书群组中添加"自定义机器人"
+# 2. 获取 Webhook URL
+# 3. 配置安全设置（可选：关键词验证、IP白名单等）
+LARK_WEBHOOK_URL="https://open.larksuite.com/open-apis/bot/v2/hook/your-webhook-id-here"
+
+# 可选：机器人名称（显示在消息中）
+LARK_BOT_NAME="API Gateway Deploy Bot"
+
+# 可选：是否启用 @所有人（true/false）
+LARK_MENTION_ALL="false"
+
+# 示例配置（请替换为实际值）:
+# LARK_WEBHOOK_URL="https://open.larksuite.com/open-apis/bot/v2/hook/085f7571-9281-4840-92b6-14a382c33ee9"
+# LARK_BOT_NAME="部署机器人"  
+# LARK_MENTION_ALL="false"
