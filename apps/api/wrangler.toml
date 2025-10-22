@@ -1,0 +1,260 @@
+name = "api-gateway-do-for-kv"
+main = "src/index.ts"
+compatibility_date = "2024-06-25"
+
+# ============================================
+# 测试环境配置（默认）
+# ============================================
+account_id = "625675bb221d602eccde58bb23facbfb"
+
+# ============================================
+# 生产环境配置
+# 使用方式: wrangler deploy --env production
+# 或使用智能部署脚本自动选择
+# ============================================
+[env.production]
+account_id = "80e68ad465093681d7d893b6c122f9b8"
+
+# 生产环境 - Workers Queue 配置
+[[env.production.queues.producers]]
+queue = "traffic-events"
+binding = "TRAFFIC_QUEUE"
+
+[[env.production.queues.consumers]]
+queue = "traffic-events"
+max_batch_size = 100
+max_batch_timeout = 5
+max_retries = 3
+max_concurrency = 1
+dead_letter_queue = "traffic-events-dlq"
+
+# 生产环境 - KV 命名空间绑定（独立的生产环境 KV）
+[[env.production.kv_namespaces]]
+binding = "API_GATEWAY_STORAGE"
+id = "b91bfa214c174863b61931e77051e63a"
+
+# 生产环境 - D1 数据库绑定
+[[env.production.d1_databases]]
+binding = "D1"
+database_name = "path-stats-db-prod"
+database_id = "f4e6e1fb-8d94-4ef1-961b-a2dc6d0a8b15"  # ✅ 已创建
+
+# 生产环境 - R2 存储绑定
+[[env.production.r2_buckets]]
+binding = "R2_ARCHIVE"
+bucket_name = "api-gateway-archive-prod"
+# 创建命令: wrangler r2 bucket create api-gateway-archive-prod --env production
+
+# 生产环境 - Durable Objects 绑定
+[env.production.durable_objects]
+bindings = [
+  { name = "COUNTER", class_name = "Counter", script_name = "" },
+  { name = "RATE_LIMITER", class_name = "RateLimiter", script_name = "" },
+  { name = "TRAFFIC_MONITOR", class_name = "TrafficMonitor", script_name = "" }
+  # PATH_COLLECTOR 和 GLOBAL_STATS_AGGREGATOR 已废弃（Phase 3：使用 Queue + D1 替代）
+]
+
+# 生产环境 - 环境变量
+[env.production.vars]
+DEFAULT_RATE_LIMIT = "60"
+DEFAULT_RATE_WINDOW = "60"
+DEFAULT_CACHE_VERSION = "1"
+TRAFFIC_THRESHOLD = "10000"
+USE_ANALYTICS_ENGINE = "false"
+TRAFFIC_SAMPLING_RATE = "1.0"
+PATH_COLLECTION_ENABLED = "true"
+# Phase 1: 启用队列收集（生产环境）
+USE_TRAFFIC_QUEUE = "true"
+
+# ============================================
+# Dev 环境配置（独立开发测试环境）
+# 使用方式: wrangler deploy --env dev
+# 特点：完全独立，不影响线上和测试环境
+# ============================================
+[env.dev]
+name = "api-gateway-do-for-kv-dev"
+account_id = "625675bb221d602eccde58bb23facbfb"  # 使用测试账号
+
+# Dev 环境 - Workers Queue 配置
+[[env.dev.queues.producers]]
+queue = "traffic-events-dev"
+binding = "TRAFFIC_QUEUE"
+
+[[env.dev.queues.consumers]]
+queue = "traffic-events-dev"
+max_batch_size = 100
+max_batch_timeout = 5
+max_retries = 3
+max_concurrency = 1
+dead_letter_queue = "traffic-events-dev-dlq"
+
+# Dev 环境 - KV 命名空间绑定（独立的 dev 环境 KV）
+[[env.dev.kv_namespaces]]
+binding = "API_GATEWAY_STORAGE"
+id = "bb949d82e75a46c08a2b7091d0cccd70"  # 独立的 dev KV，不与 test 共享
+
+# Dev 环境 - D1 数据库绑定（独立的 dev D1）
+[[env.dev.d1_databases]]
+binding = "D1"
+database_name = "path-stats-db-dev"
+database_id = "97b43e9d-adaa-4398-848b-ea4458dc2069"  # 独立的 dev D1，不与 test 共享
+
+# Dev 环境 - R2 存储绑定（独立的 dev R2）
+[[env.dev.r2_buckets]]
+binding = "R2_ARCHIVE"
+bucket_name = "api-gateway-archive-dev"  # 独立的 dev R2，不与 test 共享
+
+# Dev 环境 - Durable Objects 绑定
+[env.dev.durable_objects]
+bindings = [
+  { name = "COUNTER", class_name = "Counter", script_name = "" },
+  { name = "RATE_LIMITER", class_name = "RateLimiter", script_name = "" },
+  { name = "TRAFFIC_MONITOR", class_name = "TrafficMonitor", script_name = "" }
+  # PATH_COLLECTOR 和 GLOBAL_STATS_AGGREGATOR 已废弃（Phase 3：使用 Queue + D1 替代）
+]
+
+# Dev 环境 - 环境变量（完全参考生产配置）
+[env.dev.vars]
+DEFAULT_RATE_LIMIT = "60"
+DEFAULT_RATE_WINDOW = "60"
+DEFAULT_CACHE_VERSION = "1"
+TRAFFIC_THRESHOLD = "10000"
+USE_ANALYTICS_ENGINE = "false"
+TRAFFIC_SAMPLING_RATE = "1.0"
+PATH_COLLECTION_ENABLED = "true"
+USE_TRAFFIC_QUEUE = "true"
+
+# 本地开发环境（使用 .dev.vars 文件）
+[dev]
+port = 8787
+host = "localhost"
+
+# Cloudflare 服务绑定
+
+# ============================================
+# Workers Queue 配置（Phase 1: 路径统计重构）
+# ============================================
+
+# 队列生产者（Worker 发送事件）
+[[queues.producers]]
+queue = "traffic-events"
+binding = "TRAFFIC_QUEUE"
+
+# 队列消费者（处理统计事件）
+[[queues.consumers]]
+queue = "traffic-events"
+max_batch_size = 100        # 每批最多 100 条消息
+max_batch_timeout = 5       # 最多等待 5 秒
+max_retries = 3             # 失败后重试 3 次
+max_concurrency = 1         # ⚠️ 关键：单消费者，避免并发冲突
+dead_letter_queue = "traffic-events-dlq"
+
+# KV 命名空间绑定
+[[kv_namespaces]]
+binding = "API_GATEWAY_STORAGE" # Available as env.API_GATEWAY_STORAGE
+id = "2e834fa039d54991a92dc9208cb1775e" # API Gateway main storage
+
+# ============================================
+# D1 数据库绑定（Phase 2: 路径统计持久化）
+# ============================================
+
+[[d1_databases]]
+binding = "D1"                          # Available as env.D1
+database_name = "path-stats-db"
+database_id = "2615e7d7-cb18-4ead-9437-8543f43f9ee1"  # ✅ Test 环境（团队共享）
+# 
+# ⚠️  重要说明：
+# - Test 环境是团队共享的测试环境，所有成员共用此 D1 数据库
+# - 本地开发请使用: wrangler dev --local（使用本地 SQLite，不影响远程）
+# - 或使用独立 dev 环境: wrangler dev --env dev
+# - 不要直接 wrangler deploy 到 Test 环境，除非是正式测试部署
+# 
+# 创建命令: wrangler d1 create path-stats-db
+
+# ============================================
+# R2 存储绑定（Phase 2: 归档）
+# ============================================
+
+[[r2_buckets]]
+binding = "R2_ARCHIVE"                  # Available as env.R2_ARCHIVE
+bucket_name = "api-gateway-archive"
+# 创建命令: wrangler r2 bucket create api-gateway-archive
+
+# Analytics Engine 绑定 - 暂时禁用以便部署
+# [[analytics_engine_datasets]]
+# binding = "TRAFFIC_ANALYTICS"
+# dataset = "api_traffic"
+
+# Durable Objects 绑定
+[durable_objects]
+bindings = [
+  { name = "COUNTER", class_name = "Counter", script_name = "" },
+  { name = "RATE_LIMITER", class_name = "RateLimiter", script_name = "" },
+  { name = "TRAFFIC_MONITOR", class_name = "TrafficMonitor", script_name = "" }
+  # PATH_COLLECTOR 和 GLOBAL_STATS_AGGREGATOR 已废弃（Phase 3：使用 Queue + D1 替代）
+]
+
+# Durable Objects 迁移 - 使用 SQLite 存储（免费计划）
+[[migrations]]
+tag = "v1"
+# 【计数器】的 Durable Objects
+new_sqlite_classes = [ "Counter" ]
+
+[[migrations]]
+tag = "v2"
+# 【限流】与【流量监控】的 Durable Objects
+new_sqlite_classes = [ "RateLimiter", "TrafficMonitor" ]
+
+# ⚠️ 已废弃：PathCollector 和 GlobalStatsAggregator DO 已在 Phase 3 下线
+# 这些类仅作为 migration 占位符存在，实际功能已迁移到 Queue + D1
+# 所有调用这些 DO 的代码都返回 410 Gone
+
+[[migrations]]
+tag = "v3"
+# 【路径收集】的 Durable Objects（已废弃 - Phase 3，仅占位）
+new_sqlite_classes = [ "PathCollector" ]
+
+[[migrations]]
+tag = "v4"
+# 【全局统计聚合器】的 Durable Objects（已废弃 - Phase 3，仅占位）
+new_sqlite_classes = [ "GlobalStatsAggregator" ]
+
+# 环境变量
+[vars]
+# 默认限流值
+DEFAULT_RATE_LIMIT = "60"
+# 默认限流窗口
+DEFAULT_RATE_WINDOW = "60"
+# 默认缓存版本
+DEFAULT_CACHE_VERSION = "1"
+# 流量阈值
+TRAFFIC_THRESHOLD = "10000"
+# Analytics Engine 特性开关 - 暂时禁用
+USE_ANALYTICS_ENGINE = "false"
+TRAFFIC_SAMPLING_RATE = "1.0"
+# 路径收集功能开关（使用DO方案）
+PATH_COLLECTION_ENABLED = "true"
+# Phase 1: 启用队列收集（测试环境）
+USE_TRAFFIC_QUEUE = "true"
+
+# 观测性配置 - 启用结构化日志记录
+# 注意：此功能需要付费计划，已禁用以节省成本
+# 如需调试可以使用: wrangler tail --env production
+[observability]
+enabled = false
+head_sampling_rate = 1.0
+
+# ============================================
+# Cron Triggers（Phase 2: 定时任务）
+# ============================================
+
+[triggers]
+crons = [
+  "*/5 * * * *",  # 每 5 分钟：聚合地理流量数据（实时地图）
+  "*/10 * * * *", # 每 10 分钟：生成 Dashboard 快照
+  "0 * * * *",    # 每小时：生成路径统计快照
+  "0 2 * * *",    # 每天凌晨 2 点：归档任务（3 天前的数据）
+  "0 3 * * *",    # 每天凌晨 3 点：清理任务（删除已归档数据）
+  "0 4 * * *"     # 每天凌晨 4 点：容量监控（D1 存储统计）
+  # "0 5 * * SUN" # 每周日凌晨 5 点：KV 快照清理（暂时禁用，可按需启用）
+]

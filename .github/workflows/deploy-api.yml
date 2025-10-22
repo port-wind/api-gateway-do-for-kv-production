@@ -1,0 +1,181 @@
+name: Deploy API to Cloudflare Workers (Production)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "版本号"
+        required: false
+        type: string
+      change_log:
+        description: "变更说明"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+  issues: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: 确定版本号
+      id: version
+      run: |
+        if [ "${{ github.event.inputs.version }}" != "" ]; then
+          VERSION="${{ github.event.inputs.version }}"
+        else
+          VERSION="v$(date +%Y%m%d%H%M%S)"
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "📌 版本: $VERSION"
+        echo "☁️  部署目标: Cloudflare Workers (Production)"
+        echo "🔧 框架: Hono + Durable Objects + KV"
+        echo "🎯 Worker: api-gateway-do-for-kv-production"
+        echo "📁 Monorepo: apps/api"
+
+  request-approval:
+    needs: build
+    uses: ./.github/workflows/reusable-lark-approval.yml
+    with:
+      project_type: workers
+      project_name: api-gateway-do-for-kv-production
+      version: ${{ needs.build.outputs.version }}
+      change_log: ${{ github.event.inputs.change_log || 'Production deployment' }}
+    secrets:
+      LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
+      LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
+      LARK_CHAT_ID: ${{ secrets.LARK_CHAT_ID }}
+      APPROVAL_CALLBACK_BASE: ${{ secrets.APPROVAL_CALLBACK_BASE }}
+      CALLBACK_SIGN: ${{ secrets.CALLBACK_SIGN }}
+
+  deploy:
+    needs: [build, request-approval]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+    
+    - name: Check project structure
+      run: |
+        echo "📁 项目结构:"
+        ls -la
+        echo ""
+        echo "📁 apps/api 目录:"
+        ls -la apps/api/
+        echo ""
+        echo "📄 检查 package.json:"
+        if [ -f "apps/api/package.json" ]; then
+          echo "✅ package.json 存在"
+          cat apps/api/package.json
+        else
+          echo "⚠️ apps/api/package.json 不存在"
+        fi
+        echo ""
+        echo "📄 检查 wrangler.toml:"
+        if [ -f "apps/api/wrangler.toml" ]; then
+          echo "✅ wrangler.toml 存在"
+          cat apps/api/wrangler.toml
+        else
+          echo "⚠️ apps/api/wrangler.toml 不存在"
+        fi
+    
+    - name: Install dependencies
+      working-directory: apps/api
+      run: |
+        echo "📦 安装依赖..."
+        npm install
+        echo "✅ 依赖安装完成"
+        echo ""
+        echo "📦 已安装的包:"
+        npm list --depth=0
+    
+    - name: Deploy to Cloudflare Workers (production)
+      working-directory: apps/api
+      env:
+        CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      run: |
+        echo "🚀 开始部署到 Cloudflare Workers..."
+        echo "📍 当前目录: $(pwd)"
+        echo "📄 配置文件: wrangler.toml"
+        echo ""
+        npx wrangler deploy --env production
+        echo ""
+        echo "✅ 部署完成"
+    
+    - name: Create Release
+      if: success()
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          try {
+            const version = '${{ needs.build.outputs.version }}';
+            await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: version,
+              name: 'Release ' + version,
+              body: 'Production Deployment - API Worker - Version: ' + version,
+              draft: false,
+              prerelease: false
+            });
+            console.log('✅ Release created successfully');
+          } catch (error) {
+            console.log('Release creation skipped:', error.message);
+          }
+
+  notify-lark:
+    needs: [build, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Lark Notification
+        env:
+          LARK_APP_ID: ${{ secrets.LARK_APP_ID }}
+          LARK_APP_SECRET: ${{ secrets.LARK_APP_SECRET }}
+          LARK_CHAT_ID: ${{ secrets.LARK_CHAT_ID }}
+        run: |
+          command -v jq >/dev/null 2>&1 || {
+            sudo apt-get update -y >/dev/null
+            sudo apt-get install -y jq >/dev/null
+          }
+          
+          TAT="$(curl -sS -X POST 'https://open.larksuite.com/open-apis/auth/v3/tenant_access_token/internal' \
+            -H 'Content-Type: application/json; charset=utf-8' \
+            -d "{\"app_id\":\"${LARK_APP_ID}\",\"app_secret\":\"${LARK_APP_SECRET}\"}" | jq -r '.tenant_access_token')"
+          
+          if [ -n "$TAT" ] && [ "$TAT" != "null" ]; then
+            if [ "${{ needs.deploy.result }}" = "success" ]; then
+              STATUS_MSG="[api-gateway-do-for-kv-production] ✅ Production 部署成功 - 版本: ${{ needs.build.outputs.version }} - Worker: api-gateway-do-for-kv-production"
+            else
+              STATUS_MSG="[api-gateway-do-for-kv-production] ❌ Production 部署失败 - 版本: ${{ needs.build.outputs.version }}"
+            fi
+            
+            curl -sS -X POST 'https://open.larksuite.com/open-apis/im/v1/messages?receive_id_type=chat_id' \
+              -H "Authorization: Bearer ${TAT}" \
+              -H 'Content-Type: application/json; charset=utf-8' \
+              -d "{
+                \"receive_id\": \"${LARK_CHAT_ID}\",
+                \"msg_type\": \"text\",
+                \"content\": \"{\\\"text\\\":\\\"${STATUS_MSG}\\\"}\"
+              }"
+            
+            echo "✅ 飞书通知已发送: ${STATUS_MSG}"
+          else
+            echo "⚠️ 无法获取飞书 token，跳过通知"
+          fi

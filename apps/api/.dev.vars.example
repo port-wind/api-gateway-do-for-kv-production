@@ -1,0 +1,25 @@
+# 本地开发环境变量示例
+# 复制此文件为 .dev.vars 并根据需要修改
+
+# ============================================
+# Phase 1: Workers Queue 配置
+# ============================================
+
+# 控制是否使用 Workers Queue 进行路径统计
+# - true: 使用队列（需要先创建本地队列或连接到远程）
+# - false: 跳过队列，直接使用 PathCollector DO（本地开发推荐）
+USE_TRAFFIC_QUEUE=false
+
+# ============================================
+# 其他环境变量
+# ============================================
+
+# 路径收集功能开关
+PATH_COLLECTION_ENABLED=true
+
+# Analytics Engine（如果需要）
+USE_ANALYTICS_ENGINE=false
+
+# 流量采样率（1.0 = 100%）
+TRAFFIC_SAMPLING_RATE=1.0
+
