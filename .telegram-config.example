@@ -1,0 +1,21 @@
+# Telegram 通知配置示例
+# 复制此文件为 .telegram-config 并填入你的配置信息
+# 注意：.telegram-config 文件已添加到 .gitignore，不会被提交到版本控制
+
+# Telegram Bot Token
+# 1. 在 Telegram 中联系 @BotFather
+# 2. 发送 /newbot 创建新机器人
+# 3. 获取 Bot Token
+TELEGRAM_BOT_TOKEN="your_bot_token_here"
+
+# Telegram Chat ID  
+# 1. 将机器人添加到群组或直接与机器人对话
+# 2. 发送任意消息给机器人
+# 3. 访问 https://api.telegram.org/bot<your_bot_token>/getUpdates
+# 4. 在返回的 JSON 中找到 chat.id
+TELEGRAM_CHAT_ID="your_chat_id_here"
+
+# 示例配置（请替换为实际值）:
+# TELEGRAM_BOT_TOKEN="123456789:ABCdefGHIjklMNOpqrsTUVwxyz"
+# TELEGRAM_CHAT_ID="-1001234567890"  # 群组 ID 通常以 -100 开头
+# TELEGRAM_CHAT_ID="1234567890"      # 个人 Chat ID 是纯数字

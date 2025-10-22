@@ -1,0 +1,45 @@
+{
+  "family": "api-gateway-loadtest-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::905418135412:role/ecsTaskExecutionRole",
+  "containerDefinitions": [
+    {
+      "name": "loadtest",
+      "image": "905418135412.dkr.ecr.us-west-2.amazonaws.com/api-gateway-loadtest-wrk:latest",
+      "essential": true,
+      "environment": [
+        {
+          "name": "TARGET_URL",
+          "value": "https://pwtk-kv-manager.andy-zhan.workers.dev/cached-kv/aws-test"
+        },
+        {
+          "name": "THREADS",
+          "value": "4"
+        },
+        {
+          "name": "CONNECTIONS",
+          "value": "500"
+        },
+        {
+          "name": "DURATION",
+          "value": "60"
+        },
+        {
+          "name": "API_KEY",
+          "value": "pwtk-api-key-2025"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/loadtest",
+          "awslogs-region": "us-west-2",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ]
+}

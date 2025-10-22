@@ -1,0 +1,306 @@
+#!/usr/bin/env groovy
+
+/**
+ * API Gateway Jenkins 部署流水线 - 多账号支持版本
+ * 
+ * 支持:
+ * - 测试环境 (625675bb221d602eccde58bb23facbfb)
+ * - 生产环境 (80e68ad465093681d7d893b6c122f9b8)
+ * - 自动选择对应账号的 API Token
+ * - 参数化部署
+ */
+
+pipeline {
+    agent any
+    
+    parameters {
+        choice(
+            name: 'ENVIRONMENT',
+            choices: ['test', 'production'],
+            description: '选择部署环境'
+        )
+        choice(
+            name: 'DEPLOY_TARGET',
+            choices: ['all', 'api', 'web'],
+            description: '选择部署目标'
+        )
+        booleanParam(
+            name: 'SKIP_TESTS',
+            defaultValue: false,
+            description: '跳过测试（不推荐）'
+        )
+    }
+    
+    environment {
+        // 根据环境参数动态选择 Cloudflare 凭证
+        CLOUDFLARE_API_TOKEN = credentials(
+            params.ENVIRONMENT == 'production' 
+                ? 'cloudflare-api-token-prod' 
+                : 'cloudflare-api-token-test'
+        )
+        
+        // 设置对应的账号 ID
+        CLOUDFLARE_ACCOUNT_ID = params.ENVIRONMENT == 'production' 
+            ? '80e68ad465093681d7d893b6c122f9b8'
+            : '625675bb221d602eccde58bb23facbfb'
+        
+        // 飞书 Webhook（可选）
+        LARK_WEBHOOK_URL = credentials('lark-webhook-url')
+        
+        // 构建信息
+        BUILD_USER = "${env.BUILD_USER_ID ?: 'jenkins'}"
+        GIT_COMMIT_SHORT = sh(script: "git log -1 --pretty=format:'%h'", returnStdout: true).trim()
+        GIT_COMMIT_MSG = sh(script: "git log -1 --pretty=format:'%s'", returnStdout: true).trim()
+    }
+    
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timeout(time: 30, unit: 'MINUTES')
+        disableConcurrentBuilds()
+        timestamps()
+    }
+    
+    stages {
+        stage('初始化') {
+            steps {
+                script {
+                    // 根据环境设置图标和名称
+                    def envIcon = params.ENVIRONMENT == 'production' ? '🟢' : '🟡'
+                    def envName = params.ENVIRONMENT == 'production' ? '生产环境' : '测试环境'
+                    def envEmail = params.ENVIRONMENT == 'production' ? 'portwind520@gmail.com' : '测试账号'
+                    
+                    echo """
+                    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                    🚀 API Gateway 部署流水线
+                    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                    ${envIcon} 环境:      ${envName}
+                    📧 账号:      ${envEmail}
+                    🔑 Account ID: ${env.CLOUDFLARE_ACCOUNT_ID}
+                    🎯 部署目标:  ${params.DEPLOY_TARGET}
+                    📦 构建号:    #${env.BUILD_NUMBER}
+                    🌿 分支:      ${env.GIT_BRANCH}
+                    📝 提交:      ${env.GIT_COMMIT_SHORT}
+                    👤 触发者:    ${env.BUILD_USER}
+                    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                    """
+                }
+            }
+        }
+        
+        stage('生产环境确认') {
+            when {
+                expression { params.ENVIRONMENT == 'production' }
+            }
+            steps {
+                script {
+                    // 生产环境需要额外确认
+                    timeout(time: 5, unit: 'MINUTES') {
+                        input(
+                            message: '⚠️  确认部署到生产环境？',
+                            ok: '确认部署',
+                            submitter: 'admin'  // 可以限制只有特定用户才能确认
+                        )
+                    }
+                    echo '✅ 生产环境部署已确认'
+                }
+            }
+        }
+        
+        stage('检出代码') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('环境检查') {
+            steps {
+                sh '''
+                    echo "📋 检查环境..."
+                    
+                    # 检查 Node.js
+                    if ! command -v node &> /dev/null; then
+                        echo "❌ Node.js 未安装"
+                        exit 1
+                    fi
+                    echo "✅ Node.js: $(node --version)"
+                    
+                    # 检查/安装 pnpm
+                    if ! command -v pnpm &> /dev/null; then
+                        echo "⚙️  安装 pnpm..."
+                        npm install -g pnpm
+                    fi
+                    echo "✅ pnpm: $(pnpm --version)"
+                    
+                    # 检查/安装 wrangler
+                    if ! command -v wrangler &> /dev/null; then
+                        echo "⚙️  安装 wrangler..."
+                        npm install -g wrangler
+                    fi
+                    echo "✅ wrangler: $(wrangler --version)"
+                    
+                    # 显示当前账号信息
+                    echo ""
+                    echo "🔑 Cloudflare 账号信息:"
+                    echo "   Account ID: $CLOUDFLARE_ACCOUNT_ID"
+                '''
+            }
+        }
+        
+        stage('安装依赖') {
+            steps {
+                sh '''
+                    echo "📦 安装项目依赖..."
+                    pnpm install --frozen-lockfile --prefer-offline
+                '''
+            }
+        }
+        
+        stage('运行测试') {
+            when {
+                expression { !params.SKIP_TESTS }
+            }
+            steps {
+                sh '''
+                    echo "🧪 运行单元测试..."
+                    pnpm run test:api:unit || {
+                        echo "❌ 测试失败"
+                        exit 1
+                    }
+                '''
+            }
+        }
+        
+        stage('部署') {
+            steps {
+                script {
+                    def envFlag = params.ENVIRONMENT == 'production' ? '--env production' : ''
+                    def envIcon = params.ENVIRONMENT == 'production' ? '🟢' : '🟡'
+                    
+                    switch(params.DEPLOY_TARGET) {
+                        case 'all':
+                            echo "${envIcon} 部署 API + Web（并行模式）"
+                            // 对于 all 模式，我们需要确保 API 使用正确的环境
+                            if (params.ENVIRONMENT == 'production') {
+                                sh '''
+                                    # API 部署到生产环境
+                                    cd apps/api
+                                    wrangler deploy --env production
+                                    cd ../..
+                                    
+                                    # Web 部署
+                                    pnpm run deploy:web
+                                '''
+                            } else {
+                                sh 'pnpm run deploy'
+                            }
+                            break
+                            
+                        case 'api':
+                            echo "${envIcon} 只部署 API"
+                            sh """
+                                cd apps/api
+                                wrangler deploy ${envFlag}
+                            """
+                            break
+                            
+                        case 'web':
+                            echo "${envIcon} 只部署 Web"
+                            sh 'pnpm run deploy:web'
+                            break
+                            
+                        default:
+                            error "未知的部署目标: ${params.DEPLOY_TARGET}"
+                    }
+                }
+            }
+        }
+        
+        stage('验证部署') {
+            when {
+                expression { params.DEPLOY_TARGET == 'api' || params.DEPLOY_TARGET == 'all' }
+            }
+            steps {
+                script {
+                    echo '🔍 验证 API 部署...'
+                    // 这里可以添加健康检查
+                    // 例如：curl 测试部署的 Worker 是否正常响应
+                }
+            }
+        }
+    }
+    
+    post {
+        success {
+            script {
+                def envIcon = params.ENVIRONMENT == 'production' ? '🟢' : '🟡'
+                def envName = params.ENVIRONMENT == 'production' ? '生产环境' : '测试环境'
+                
+                def message = """
+                ✅ API Gateway 部署成功
+                
+                ${envIcon} 环境: ${envName}
+                🎯 目标: ${params.DEPLOY_TARGET}
+                📦 构建: #${env.BUILD_NUMBER}
+                🌿 分支: ${env.GIT_BRANCH}
+                📝 提交: ${env.GIT_COMMIT_SHORT} - ${env.GIT_COMMIT_MSG}
+                👤 触发: ${env.BUILD_USER}
+                ⏱️  耗时: ${currentBuild.durationString.replace(' and counting', '')}
+                """
+                
+                echo message
+                
+                // 发送飞书通知
+                if (env.LARK_WEBHOOK_URL) {
+                    sh """
+                        curl -X POST '${env.LARK_WEBHOOK_URL}' \
+                        -H 'Content-Type: application/json' \
+                        -d '{
+                            "msg_type": "text",
+                            "content": {
+                                "text": "${message.replaceAll('"', '\\\\"').replaceAll('\n', '\\\\n')}"
+                            }
+                        }'
+                    """
+                }
+            }
+        }
+        
+        failure {
+            script {
+                def envIcon = params.ENVIRONMENT == 'production' ? '🟢' : '🟡'
+                def envName = params.ENVIRONMENT == 'production' ? '生产环境' : '测试环境'
+                
+                def message = """
+                ❌ API Gateway 部署失败
+                
+                ${envIcon} 环境: ${envName}
+                🎯 目标: ${params.DEPLOY_TARGET}
+                📦 构建: #${env.BUILD_NUMBER}
+                👤 触发: ${env.BUILD_USER}
+                
+                🔗 查看日志: ${env.BUILD_URL}console
+                """
+                
+                echo message
+                
+                // 发送飞书通知
+                if (env.LARK_WEBHOOK_URL) {
+                    sh """
+                        curl -X POST '${env.LARK_WEBHOOK_URL}' \
+                        -H 'Content-Type: application/json' \
+                        -d '{
+                            "msg_type": "text",
+                            "content": {
+                                "text": "${message.replaceAll('"', '\\\\"').replaceAll('\n', '\\\\n')}"
+                            }
+                        }'
+                    """
+                }
+            }
+        }
+        
+        always {
+            echo '🧹 清理工作...'
+        }
+    }
+}
