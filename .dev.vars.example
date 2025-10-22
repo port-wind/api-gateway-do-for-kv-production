@@ -1,0 +1,5 @@
+# Local development secrets (copy to .dev.vars)
+# For production, use: wrangler secret put SECRET_NAME --env production
+
+JWT_SECRET=your-jwt-secret-here
+API_KEY=your-api-key-here

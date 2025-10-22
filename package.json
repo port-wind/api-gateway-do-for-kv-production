@@ -1,0 +1,46 @@
+{
+  "name": "@gateway/monorepo",
+  "version": "1.0.1",
+  "description": "API Gateway Monorepo with API and Web Dashboard",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --parallel dev",
+    "dev:api": "pnpm --filter @gateway/api dev",
+    "dev:web": "pnpm --filter @gateway/web dev",
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "test:run": "pnpm -r test:run",
+    "test:api": "pnpm --filter @gateway/api test:run",
+    "test:api:unit": "pnpm --filter @gateway/api test:unit",
+    "test:api:integration": "pnpm --filter @gateway/api test:integration",
+    "test:api:e2e": "pnpm --filter @gateway/api test:e2e",
+    "test:api:coverage": "pnpm --filter @gateway/api test:coverage",
+    "test:ci": "pnpm -r test:ci",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "deploy": "bash scripts/deploy-all-to-197.sh --parallel",
+    "deploy:api": "pnpm --filter @gateway/api run deploy",
+    "deploy:web": "bash scripts/deploy-web-to-197.sh",
+    "deploy:web:fast": "bash scripts/deploy-web-to-197.sh --fast",
+    "deploy:web:skip-build": "bash scripts/deploy-web-to-197.sh --skip-build",
+    "generate:route": "pnpm --filter @gateway/api generate:route",
+    "build:serve": "bash build-and-serve.sh",
+    "build:197": "bash build-and-serve.sh 8197",
+    "query-errors": "bash scripts/query-errors-prod.sh list 10",
+    "query-errors:stats": "bash scripts/query-errors-prod.sh stats",
+    "query-errors:hourly": "bash scripts/query-errors-prod.sh hourly",
+    "query-errors:test": "cd apps/api && wrangler d1 execute path-stats-db --remote --command=\"SELECT datetime(timestamp/1000, 'unixepoch', 'localtime') AS time, path, method, status, response_time, country FROM traffic_events WHERE event_date = date('now') AND status >= 400 ORDER BY timestamp DESC LIMIT 10;\"",
+    "query-errors:test:stats": "cd apps/api && wrangler d1 execute path-stats-db --remote --command=\"SELECT CASE WHEN status BETWEEN 400 AND 499 THEN '4xx' WHEN status >= 500 THEN '5xx' END AS type, status, COUNT(*) AS count, ROUND(AVG(response_time), 2) AS avg_rt FROM traffic_events WHERE event_date = date('now') AND status >= 400 GROUP BY type, status ORDER BY count DESC;\""
+  },
+  "keywords": ["monorepo", "api", "gateway", "admin", "dashboard"],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "prettier": "^3.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18",
+    "pnpm": ">=8"
+  }
+}

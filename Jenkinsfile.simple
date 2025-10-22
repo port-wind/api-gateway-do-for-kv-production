@@ -1,0 +1,44 @@
+#!/usr/bin/env groovy
+
+/**
+ * 简化版 Jenkins 部署流水线
+ * 适合快速开始使用
+ */
+
+pipeline {
+    agent any
+    
+    environment {
+        CLOUDFLARE_API_TOKEN = credentials('cloudflare-api-token-ad')
+        CLOUDFLARE_ACCOUNT_ID = '625675bb221d602eccde58bb23facbfb'
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('Install') {
+            steps {
+                sh 'pnpm install --frozen-lockfile'
+            }
+        }
+        
+        stage('Deploy') {
+            steps {
+                sh 'pnpm run deploy'
+            }
+        }
+    }
+    
+    post {
+        success {
+            echo '✅ 部署成功！'
+        }
+        failure {
+            echo '❌ 部署失败！'
+        }
+    }
+}
